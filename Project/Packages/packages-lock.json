@@ -13,7 +13,7 @@
       "dependencies": {}
     },
     "com.unity.ads": {
-      "version": "3.4.5",
+      "version": "3.4.7",
       "depth": 0,
       "source": "registry",
       "dependencies": {
@@ -31,16 +31,16 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.barracuda": {
-      "version": "0.6.1-preview",
+      "version": "0.7.1-preview",
       "depth": 1,
       "source": "registry",
       "dependencies": {
-        "com.unity.burst": "1.1.1"
+        "com.unity.burst": "1.2.3"
       },
       "url": "https://packages.unity.com"
     },
     "com.unity.burst": {
-      "version": "1.1.1",
+      "version": "1.2.3",
       "depth": 2,
       "source": "registry",
       "dependencies": {
@@ -86,11 +86,11 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.ml-agents": {
-      "version": "file:../../com.unity.ml-agents",
+      "version": "file:E:/UnityProjects/ml-agents-release_3/com.unity.ml-agents",
       "depth": 0,
       "source": "local",
       "dependencies": {
-        "com.unity.barracuda": "0.6.1-preview"
+        "com.unity.barracuda": "0.7.1-preview"
       }
     },
     "com.unity.multiplayer-hlapi": {
@@ -111,25 +111,9 @@
       },
       "url": "https://packages.unity.com"
     },
-    "com.unity.probuilder": {
-      "version": "4.2.3",
-      "depth": 0,
-      "source": "registry",
-      "dependencies": {
-        "com.unity.settings-manager": "1.0.0"
-      },
-      "url": "https://packages.unity.com"
-    },
     "com.unity.purchasing": {
       "version": "2.0.6",
       "depth": 0,
-      "source": "registry",
-      "dependencies": {},
-      "url": "https://packages.unity.com"
-    },
-    "com.unity.settings-manager": {
-      "version": "1.0.0",
-      "depth": 1,
       "source": "registry",
       "dependencies": {},
       "url": "https://packages.unity.com"

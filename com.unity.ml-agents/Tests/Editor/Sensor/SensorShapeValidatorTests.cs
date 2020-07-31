@@ -2,9 +2,9 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
-using MLAgents.Sensors;
+using Unity.MLAgents.Sensors;
 
-namespace MLAgents.Tests
+namespace Unity.MLAgents.Tests
 {
     public class DummySensor : ISensor
     {
@@ -41,12 +41,13 @@ namespace MLAgents.Tests
             return null;
         }
 
-        public int Write(WriteAdapter adapter)
+        public int Write(ObservationWriter writer)
         {
             return this.ObservationSize();
         }
 
         public void Update() { }
+        public void Reset() { }
 
         public SensorCompressionType GetCompressionType()
         {
@@ -111,13 +112,13 @@ namespace MLAgents.Tests
             validator.ValidateSensors(sensorList1);
 
             var sensorList2 = new List<ISensor>() { new DummySensor(1), new DummySensor(2, 3), new DummySensor(4, 5, 7) };
-            LogAssert.Expect(LogType.Assert, "Sensor sizes much match.");
+            LogAssert.Expect(LogType.Assert, "Sensor sizes must match.");
             validator.ValidateSensors(sensorList2);
 
             // Add the sensors in the other order
             validator = new SensorShapeValidator();
             validator.ValidateSensors(sensorList2);
-            LogAssert.Expect(LogType.Assert, "Sensor sizes much match.");
+            LogAssert.Expect(LogType.Assert, "Sensor sizes must match.");
             validator.ValidateSensors(sensorList1);
         }
 
@@ -131,7 +132,7 @@ namespace MLAgents.Tests
             var sensorList2 = new List<ISensor>() { new DummySensor(1), new DummySensor(9) };
             LogAssert.Expect(LogType.Assert, "Number of Sensors must match. 3 != 2");
             LogAssert.Expect(LogType.Assert, "Sensor dimensions must match.");
-            LogAssert.Expect(LogType.Assert, "Sensor sizes much match.");
+            LogAssert.Expect(LogType.Assert, "Sensor sizes must match.");
             validator.ValidateSensors(sensorList2);
 
             // Add the sensors in the other order
@@ -139,7 +140,7 @@ namespace MLAgents.Tests
             validator.ValidateSensors(sensorList2);
             LogAssert.Expect(LogType.Assert, "Number of Sensors must match. 2 != 3");
             LogAssert.Expect(LogType.Assert, "Sensor dimensions must match.");
-            LogAssert.Expect(LogType.Assert, "Sensor sizes much match.");
+            LogAssert.Expect(LogType.Assert, "Sensor sizes must match.");
             validator.ValidateSensors(sensorList1);
         }
     }

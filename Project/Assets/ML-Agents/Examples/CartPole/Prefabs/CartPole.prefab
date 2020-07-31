@@ -305,17 +305,18 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_BrainParameters:
-    vectorObservationSize: 3
-    numStackedVectorObservations: 1
-    vectorActionSize: 01000000
-    vectorActionDescriptions: []
-    vectorActionSpaceType: 1
-  m_Model: {fileID: 5022602860645237092, guid: 2e0ae441f913e5d4baeb44997bce0eef, type: 3}
+    VectorObservationSize: 4
+    NumStackedVectorObservations: 1
+    VectorActionSize: 01000000
+    VectorActionDescriptions: []
+    VectorActionSpaceType: 1
+  m_Model: {fileID: 5022602860645237092, guid: 6be5717ef64628d4c9e10194d07a9a7e, type: 3}
   m_InferenceDevice: 1
   m_BehaviorType: 0
   m_BehaviorName: CartPole
   TeamId: 0
   m_UseChildSensors: 1
+  m_ObservableAttributeHandling: 0
 --- !u!114 &3009594776661133901
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -331,7 +332,7 @@ MonoBehaviour:
   agentParameters:
     maxStep: 0
   hasUpgradedFromAgentParameters: 1
-  maxStep: 5000
+  MaxStep: 500
   pole: {fileID: 3009594775213538426}
 --- !u!114 &3009594776661133903
 MonoBehaviour:
@@ -345,6 +346,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3a5c9d521e5ef4759a8246a07d52221e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  DecisionPeriod: 5
+  DecisionPeriod: 1
   TakeActionsBetweenDecisions: 1
-  offsetStep: 0

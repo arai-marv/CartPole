@@ -2,9 +2,10 @@
 
 using System.Collections;
 using UnityEngine;
-using MLAgents;
-using Barracuda;
-using MLAgents.Sensors;
+using Unity.MLAgents;
+using Unity.Barracuda;
+using Unity.MLAgents.Sensors;
+using Unity.MLAgentsExamples;
 
 public class WallJumpAgent : Agent
 {
@@ -41,6 +42,12 @@ public class WallJumpAgent : Agent
     Vector3 m_JumpTargetPos;
     Vector3 m_JumpStartingPos;
 
+    string m_NoWallBehaviorName = "SmallWallJump";
+    string m_SmallWallBehaviorName = "SmallWallJump";
+    string m_BigWallBehaviorName = "BigWallJump";
+
+    EnvironmentParameters m_ResetParams;
+
     public override void Initialize()
     {
         m_WallJumpSettings = FindObjectOfType<WallJumpSettings>();
@@ -53,6 +60,22 @@ public class WallJumpAgent : Agent
         m_GroundMaterial = m_GroundRenderer.material;
 
         spawnArea.SetActive(false);
+
+        m_ResetParams = Academy.Instance.EnvironmentParameters;
+
+        // Update model references if we're overriding
+        var modelOverrider = GetComponent<ModelOverrider>();
+        if (modelOverrider.HasOverrides)
+        {
+            noWallBrain = modelOverrider.GetModelForBehaviorName(m_NoWallBehaviorName);
+            m_NoWallBehaviorName = ModelOverrider.GetOverrideBehaviorName(m_NoWallBehaviorName);
+
+            smallWallBrain = modelOverrider.GetModelForBehaviorName(m_SmallWallBehaviorName);
+            m_SmallWallBehaviorName = ModelOverrider.GetOverrideBehaviorName(m_SmallWallBehaviorName);
+
+            bigWallBrain = modelOverrider.GetModelForBehaviorName(m_BigWallBehaviorName);
+            m_BigWallBehaviorName = ModelOverrider.GetOverrideBehaviorName(m_BigWallBehaviorName);
+        }
     }
 
     // Begin the jump sequence
@@ -236,27 +259,25 @@ public class WallJumpAgent : Agent
         }
     }
 
-    public override float[] Heuristic()
+    public override void Heuristic(float[] actionsOut)
     {
-        var action = new float[4];
         if (Input.GetKey(KeyCode.D))
         {
-            action[1] = 2f;
+            actionsOut[1] = 2f;
         }
         if (Input.GetKey(KeyCode.W))
         {
-            action[0] = 1f;
+            actionsOut[0] = 1f;
         }
         if (Input.GetKey(KeyCode.A))
         {
-            action[1] = 1f;
+            actionsOut[1] = 1f;
         }
         if (Input.GetKey(KeyCode.S))
         {
-            action[0] = 2f;
+            actionsOut[0] = 2f;
         }
-        action[3] = Input.GetKey(KeyCode.Space) ? 1.0f : 0.0f;
-        return action;
+        actionsOut[3] = Input.GetKey(KeyCode.Space) ? 1.0f : 0.0f;
     }
 
     // Detect when the agent hits the goal
@@ -313,31 +334,31 @@ public class WallJumpAgent : Agent
         {
             localScale = new Vector3(
                 localScale.x,
-                Academy.Instance.FloatProperties.GetPropertyWithDefault("no_wall_height", 0),
+                m_ResetParams.GetWithDefault("no_wall_height", 0),
                 localScale.z);
             wall.transform.localScale = localScale;
-            SetModel("SmallWallJump", noWallBrain);
+            SetModel(m_NoWallBehaviorName, noWallBrain);
         }
         else if (config == 1)
         {
             localScale = new Vector3(
                 localScale.x,
-                Academy.Instance.FloatProperties.GetPropertyWithDefault("small_wall_height", 4),
+                m_ResetParams.GetWithDefault("small_wall_height", 4),
                 localScale.z);
             wall.transform.localScale = localScale;
-            SetModel("SmallWallJump", smallWallBrain);
+            SetModel(m_SmallWallBehaviorName, smallWallBrain);
         }
         else
         {
-            var min = Academy.Instance.FloatProperties.GetPropertyWithDefault("big_wall_min_height", 8);
-            var max = Academy.Instance.FloatProperties.GetPropertyWithDefault("big_wall_max_height", 8);
+            var min = m_ResetParams.GetWithDefault("big_wall_min_height", 8);
+            var max = m_ResetParams.GetWithDefault("big_wall_max_height", 8);
             var height = min + Random.value * (max - min);
             localScale = new Vector3(
                 localScale.x,
                 height,
                 localScale.z);
             wall.transform.localScale = localScale;
-            SetModel("BigWallJump", bigWallBrain);
+            SetModel(m_BigWallBehaviorName, bigWallBrain);
         }
     }
 }

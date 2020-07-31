@@ -2,54 +2,20 @@ import pytest
 
 import numpy as np
 
-import yaml
-
 from mlagents.trainers.ghost.trainer import GhostTrainer
+from mlagents.trainers.ghost.controller import GhostController
+from mlagents.trainers.behavior_id_utils import BehaviorIdentifiers
 from mlagents.trainers.ppo.trainer import PPOTrainer
 from mlagents.trainers.brain import BrainParameters
 from mlagents.trainers.agent_processor import AgentManagerQueue
-from mlagents.trainers.behavior_id_utils import BehaviorIdentifiers
 from mlagents.trainers.tests import mock_brain as mb
 from mlagents.trainers.tests.test_trajectory import make_fake_trajectory
+from mlagents.trainers.settings import TrainerSettings, SelfPlaySettings
 
 
 @pytest.fixture
 def dummy_config():
-    return yaml.safe_load(
-        """
-        trainer: ppo
-        batch_size: 32
-        beta: 5.0e-3
-        buffer_size: 512
-        epsilon: 0.2
-        hidden_units: 128
-        lambd: 0.95
-        learning_rate: 3.0e-4
-        max_steps: 5.0e4
-        normalize: true
-        num_epoch: 5
-        num_layers: 2
-        time_horizon: 64
-        sequence_length: 64
-        summary_freq: 1000
-        use_recurrent: false
-        normalize: true
-        memory_size: 8
-        curiosity_strength: 0.0
-        curiosity_enc_size: 1
-        summary_path: test
-        model_path: test
-        reward_signals:
-          extrinsic:
-            strength: 1.0
-            gamma: 0.99
-        self_play:
-            window: 5
-            play_against_current_self_ratio: 0.5
-            save_steps: 1000
-            swap_steps: 1000
-        """
-    )
+    return TrainerSettings(self_play=SelfPlaySettings())
 
 
 VECTOR_ACTION_SPACE = [1]
@@ -72,10 +38,10 @@ def test_load_and_set(dummy_config, use_discrete):
     trainer_params = dummy_config
     trainer = PPOTrainer(mock_brain.brain_name, 0, trainer_params, True, False, 0, "0")
     trainer.seed = 1
-    policy = trainer.create_policy(mock_brain)
+    policy = trainer.create_policy(mock_brain.brain_name, mock_brain)
     policy.create_tf_graph()
     trainer.seed = 20  # otherwise graphs are the same
-    to_load_policy = trainer.create_policy(mock_brain)
+    to_load_policy = trainer.create_policy(mock_brain.brain_name, mock_brain)
     to_load_policy.create_tf_graph()
     to_load_policy.init_load_weights()
 
@@ -116,20 +82,27 @@ def test_process_trajectory(dummy_config):
         vector_action_descriptions=[],
         vector_action_space_type=0,
     )
-    dummy_config["summary_path"] = "./summaries/test_trainer_summary"
-    dummy_config["model_path"] = "./models/test_trainer_models/TestModel"
     ppo_trainer = PPOTrainer(brain_name, 0, dummy_config, True, False, 0, "0")
-    trainer = GhostTrainer(ppo_trainer, brain_name, 0, dummy_config, True, "0")
+    controller = GhostController(100)
+    trainer = GhostTrainer(
+        ppo_trainer, brain_name, controller, 0, dummy_config, True, "0"
+    )
 
     # first policy encountered becomes policy trained by wrapped PPO
-    policy = trainer.create_policy(brain_params_team0)
-    trainer.add_policy(brain_params_team0.brain_name, policy)
+    parsed_behavior_id0 = BehaviorIdentifiers.from_name_behavior_id(
+        brain_params_team0.brain_name
+    )
+    policy = trainer.create_policy(parsed_behavior_id0, brain_params_team0)
+    trainer.add_policy(parsed_behavior_id0, policy)
     trajectory_queue0 = AgentManagerQueue(brain_params_team0.brain_name)
     trainer.subscribe_trajectory_queue(trajectory_queue0)
 
     # Ghost trainer should ignore this queue because off policy
-    policy = trainer.create_policy(brain_params_team1)
-    trainer.add_policy(brain_params_team1.brain_name, policy)
+    parsed_behavior_id1 = BehaviorIdentifiers.from_name_behavior_id(
+        brain_params_team1.brain_name
+    )
+    policy = trainer.create_policy(parsed_behavior_id1, brain_params_team1)
+    trainer.add_policy(parsed_behavior_id1, policy)
     trajectory_queue1 = AgentManagerQueue(brain_params_team1.brain_name)
     trainer.subscribe_trajectory_queue(trajectory_queue1)
 
@@ -166,9 +139,11 @@ def test_publish_queue(dummy_config):
         vector_action_space_type=0,
     )
 
-    brain_name = BehaviorIdentifiers.from_name_behavior_id(
+    parsed_behavior_id0 = BehaviorIdentifiers.from_name_behavior_id(
         brain_params_team0.brain_name
-    ).brain_name
+    )
+
+    brain_name = parsed_behavior_id0.brain_name
 
     brain_params_team1 = BrainParameters(
         brain_name="test_brain?team=1",
@@ -178,21 +153,25 @@ def test_publish_queue(dummy_config):
         vector_action_descriptions=[],
         vector_action_space_type=0,
     )
-    dummy_config["summary_path"] = "./summaries/test_trainer_summary"
-    dummy_config["model_path"] = "./models/test_trainer_models/TestModel"
     ppo_trainer = PPOTrainer(brain_name, 0, dummy_config, True, False, 0, "0")
-    trainer = GhostTrainer(ppo_trainer, brain_name, 0, dummy_config, True, "0")
+    controller = GhostController(100)
+    trainer = GhostTrainer(
+        ppo_trainer, brain_name, controller, 0, dummy_config, True, "0"
+    )
 
     # First policy encountered becomes policy trained by wrapped PPO
     # This queue should remain empty after swap snapshot
-    policy = trainer.create_policy(brain_params_team0)
-    trainer.add_policy(brain_params_team0.brain_name, policy)
+    policy = trainer.create_policy(parsed_behavior_id0, brain_params_team0)
+    trainer.add_policy(parsed_behavior_id0, policy)
     policy_queue0 = AgentManagerQueue(brain_params_team0.brain_name)
     trainer.publish_policy_queue(policy_queue0)
 
     # Ghost trainer should use this queue for ghost policy swap
-    policy = trainer.create_policy(brain_params_team1)
-    trainer.add_policy(brain_params_team1.brain_name, policy)
+    parsed_behavior_id1 = BehaviorIdentifiers.from_name_behavior_id(
+        brain_params_team1.brain_name
+    )
+    policy = trainer.create_policy(parsed_behavior_id1, brain_params_team1)
+    trainer.add_policy(parsed_behavior_id1, policy)
     policy_queue1 = AgentManagerQueue(brain_params_team1.brain_name)
     trainer.publish_policy_queue(policy_queue1)
 

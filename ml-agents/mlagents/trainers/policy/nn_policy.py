@@ -1,11 +1,12 @@
 from typing import Any, Dict, Optional, List
 from mlagents.tf_utils import tf
 from mlagents_envs.timers import timed
-from mlagents_envs.base_env import BatchedStepResult
+from mlagents_envs.base_env import DecisionSteps
 from mlagents.trainers.brain import BrainParameters
 from mlagents.trainers.models import EncoderType
 from mlagents.trainers.models import ModelUtils
 from mlagents.trainers.policy.tf_policy import TFPolicy
+from mlagents.trainers.settings import TrainerSettings
 from mlagents.trainers.distributions import (
     GaussianDistribution,
     MultiCategoricalDistribution,
@@ -19,8 +20,9 @@ class NNPolicy(TFPolicy):
         self,
         seed: int,
         brain: BrainParameters,
-        trainer_params: Dict[str, Any],
+        trainer_params: TrainerSettings,
         is_training: bool,
+        model_path: str,
         load: bool,
         tanh_squash: bool = False,
         reparameterize: bool = False,
@@ -36,20 +38,19 @@ class NNPolicy(TFPolicy):
         :param trainer_params: Defined training parameters.
         :param is_training: Whether the model should be trained.
         :param load: Whether a pre-trained model will be loaded or a new one created.
+        :param model_path: Path where the model should be saved and loaded.
         :param tanh_squash: Whether to use a tanh function on the continuous output, or a clipped output.
         :param reparameterize: Whether we are using the resampling trick to update the policy in continuous output.
         """
-        super().__init__(seed, brain, trainer_params, load)
+        super().__init__(seed, brain, trainer_params, model_path, load)
         self.grads = None
         self.update_batch: Optional[tf.Operation] = None
-        num_layers = trainer_params["num_layers"]
-        self.h_size = trainer_params["hidden_units"]
+        num_layers = self.network_settings.num_layers
+        self.h_size = self.network_settings.hidden_units
         if num_layers < 1:
             num_layers = 1
         self.num_layers = num_layers
-        self.vis_encode_type = EncoderType(
-            trainer_params.get("vis_encode_type", "simple")
-        )
+        self.vis_encode_type = self.network_settings.vis_encode_type
         self.tanh_squash = tanh_squash
         self.reparameterize = reparameterize
         self.condition_sigma_on_obs = condition_sigma_on_obs
@@ -121,16 +122,16 @@ class NNPolicy(TFPolicy):
 
     @timed
     def evaluate(
-        self, batched_step_result: BatchedStepResult, global_agent_ids: List[str]
+        self, decision_requests: DecisionSteps, global_agent_ids: List[str]
     ) -> Dict[str, Any]:
         """
         Evaluates policy for the agent experiences provided.
-        :param batched_step_result: BatchedStepResult object containing inputs.
+        :param decision_requests: DecisionSteps object containing inputs.
         :param global_agent_ids: The global (with worker ID) agent ids of the data in the batched_step_result.
         :return: Outputs from network as defined by self.inference_dict.
         """
         feed_dict = {
-            self.batch_size_ph: batched_step_result.n_agents(),
+            self.batch_size_ph: len(decision_requests),
             self.sequence_length_ph: 1,
         }
         if self.use_recurrent:
@@ -139,7 +140,7 @@ class NNPolicy(TFPolicy):
                     global_agent_ids
                 )
             feed_dict[self.memory_in] = self.retrieve_memories(global_agent_ids)
-        feed_dict = self.fill_eval_dict(feed_dict, batched_step_result)
+        feed_dict = self.fill_eval_dict(feed_dict, decision_requests)
         run_out = self._execute_model(feed_dict, self.inference_dict)
         return run_out
 

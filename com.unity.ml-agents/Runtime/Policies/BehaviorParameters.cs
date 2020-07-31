@@ -1,9 +1,10 @@
-using Barracuda;
+using Unity.Barracuda;
 using System;
 using UnityEngine;
 using UnityEngine.Serialization;
+using Unity.MLAgents.Sensors.Reflection;
 
-namespace MLAgents.Policies
+namespace Unity.MLAgents.Policies
 {
     /// <summary>
     /// Defines what type of behavior the Agent will be using
@@ -30,10 +31,42 @@ namespace MLAgents.Policies
         InferenceOnly
     }
 
+    /// <summary>
+    /// Options for controlling how the Agent class is searched for <see cref="ObservableAttribute"/>s.
+    /// </summary>
+    public enum ObservableAttributeOptions
+    {
+        /// <summary>
+        /// All ObservableAttributes on the Agent will be ignored. This is the
+        /// default behavior. If there are no  ObservableAttributes on the
+        /// Agent, this will result in the fastest initialization time.
+        /// </summary>
+        Ignore,
+
+        /// <summary>
+        /// Only members on the declared class will be examined; members that are
+        /// inherited are ignored. This is a reasonable tradeoff between
+        /// performance and flexibility.
+        /// </summary>
+        /// <remarks>This corresponds to setting the
+        /// [BindingFlags.DeclaredOnly](https://docs.microsoft.com/en-us/dotnet/api/system.reflection.bindingflags?view=netcore-3.1)
+        /// when examining the fields and properties of the Agent class instance.
+        /// </remarks>
+        ExcludeInherited,
+
+        /// <summary>
+        /// All members on the class will be examined. This can lead to slower
+        /// startup times.
+        /// </summary>
+        ExamineAll
+    }
 
     /// <summary>
-    /// The Factory to generate policies.
+    /// A component for setting an <seealso cref="Agent"/> instance's behavior and
+    /// brain properties.
     /// </summary>
+    /// <remarks>At runtime, this component generates the agent's policy objects
+    /// according to the settings you specified in the Editor.</remarks>
     [AddComponentMenu("ML Agents/Behavior Parameters", (int)MenuGroup.Default)]
     public class BehaviorParameters : MonoBehaviour
     {
@@ -41,9 +74,9 @@ namespace MLAgents.Policies
         BrainParameters m_BrainParameters = new BrainParameters();
 
         /// <summary>
-        /// The associated <see cref="BrainParameters"/> for this behavior.
+        /// The associated <see cref="Policies.BrainParameters"/> for this behavior.
         /// </summary>
-        public BrainParameters brainParameters
+        public BrainParameters BrainParameters
         {
             get { return m_BrainParameters; }
             internal set { m_BrainParameters = value; }
@@ -54,10 +87,10 @@ namespace MLAgents.Policies
 
         /// <summary>
         /// The neural network model used when in inference mode.
-        /// This should not be set at runtime; use <see cref="Agent.SetModel(string,NNModel,InferenceDevice)"/>
+        /// This should not be set at runtime; use <see cref="Agent.SetModel(string,NNModel,Policies.InferenceDevice)"/>
         /// to set it instead.
         /// </summary>
-        public NNModel model
+        public NNModel Model
         {
             get { return m_Model; }
             set { m_Model = value; UpdateAgentPolicy(); }
@@ -68,10 +101,10 @@ namespace MLAgents.Policies
 
         /// <summary>
         /// How inference is performed for this Agent's model.
-        /// This should not be set at runtime; use <see cref="Agent.SetModel(string,NNModel,InferenceDevice)"/>
+        /// This should not be set at runtime; use <see cref="Agent.SetModel(string,NNModel,Policies.InferenceDevice)"/>
         /// to set it instead.
         /// </summary>
-        public InferenceDevice inferenceDevice
+        public InferenceDevice InferenceDevice
         {
             get { return m_InferenceDevice; }
             set { m_InferenceDevice = value; UpdateAgentPolicy();}
@@ -83,7 +116,7 @@ namespace MLAgents.Policies
         /// <summary>
         /// The BehaviorType for the Agent.
         /// </summary>
-        public BehaviorType behaviorType
+        public BehaviorType BehaviorType
         {
             get { return m_BehaviorType; }
             set { m_BehaviorType = value; UpdateAgentPolicy(); }
@@ -94,11 +127,11 @@ namespace MLAgents.Policies
 
         /// <summary>
         /// The name of this behavior, which is used as a base name. See
-        /// <see cref="fullyQualifiedBehaviorName"/> for the full name.
-        /// This should not be set at runtime; use <see cref="Agent.SetModel(string,NNModel,InferenceDevice)"/>
+        /// <see cref="FullyQualifiedBehaviorName"/> for the full name.
+        /// This should not be set at runtime; use <see cref="Agent.SetModel(string,NNModel,Policies.InferenceDevice)"/>
         /// to set it instead.
         /// </summary>
-        public string behaviorName
+        public string BehaviorName
         {
             get { return m_BehaviorName; }
             set { m_BehaviorName = value; UpdateAgentPolicy(); }
@@ -121,26 +154,38 @@ namespace MLAgents.Policies
         /// Whether or not to use all the sensor components attached to child GameObjects of the agent.
         /// Note that changing this after the Agent has been initialized will not have any effect.
         /// </summary>
-        public bool useChildSensors
+        public bool UseChildSensors
         {
             get { return m_UseChildSensors; }
             set { m_UseChildSensors = value; }
         }
 
+        [HideInInspector, SerializeField]
+        ObservableAttributeOptions m_ObservableAttributeHandling = ObservableAttributeOptions.Ignore;
+
+        /// <summary>
+        /// Determines how the Agent class is searched for <see cref="ObservableAttribute"/>s.
+        /// </summary>
+        public ObservableAttributeOptions ObservableAttributeHandling
+        {
+            get { return m_ObservableAttributeHandling; }
+            set { m_ObservableAttributeHandling = value; }
+        }
+
         /// <summary>
         /// Returns the behavior name, concatenated with any other metadata (i.e. team id).
         /// </summary>
-        public string fullyQualifiedBehaviorName
+        public string FullyQualifiedBehaviorName
         {
             get { return m_BehaviorName + "?team=" + TeamId; }
         }
 
-        internal IPolicy GeneratePolicy(Func<float[]> heuristic)
+        internal IPolicy GeneratePolicy(HeuristicPolicy.ActionGenerator heuristic)
         {
             switch (m_BehaviorType)
             {
                 case BehaviorType.HeuristicOnly:
-                    return new HeuristicPolicy(heuristic);
+                    return new HeuristicPolicy(heuristic, m_BrainParameters.NumActions);
                 case BehaviorType.InferenceOnly:
                 {
                     if (m_Model == null)
@@ -156,7 +201,7 @@ namespace MLAgents.Policies
                 case BehaviorType.Default:
                     if (Academy.Instance.IsCommunicatorOn)
                     {
-                        return new RemotePolicy(m_BrainParameters, fullyQualifiedBehaviorName);
+                        return new RemotePolicy(m_BrainParameters, FullyQualifiedBehaviorName);
                     }
                     if (m_Model != null)
                     {
@@ -164,10 +209,10 @@ namespace MLAgents.Policies
                     }
                     else
                     {
-                        return new HeuristicPolicy(heuristic);
+                        return new HeuristicPolicy(heuristic, m_BrainParameters.NumActions);
                     }
                 default:
-                    return new HeuristicPolicy(heuristic);
+                    return new HeuristicPolicy(heuristic, m_BrainParameters.NumActions);
             }
         }
 

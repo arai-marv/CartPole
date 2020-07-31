@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace MLAgents.Sensors
+namespace Unity.MLAgents.Sensors
 {
     internal class SensorShapeValidator
     {
@@ -34,7 +34,7 @@ namespace MLAgents.Sensors
                     Debug.Assert(cachedShape.Length == sensorShape.Length, "Sensor dimensions must match.");
                     for (var j = 0; j < Mathf.Min(cachedShape.Length, sensorShape.Length); j++)
                     {
-                        Debug.Assert(cachedShape[j] == sensorShape[j], "Sensor sizes much match.");
+                        Debug.Assert(cachedShape[j] == sensorShape[j], "Sensor sizes must match.");
                     }
                 }
             }

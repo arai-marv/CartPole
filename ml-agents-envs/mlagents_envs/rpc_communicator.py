@@ -1,6 +1,7 @@
 import grpc
 from typing import Optional
 
+from sys import platform
 import socket
 from multiprocessing import Pipe
 from concurrent.futures import ThreadPoolExecutor
@@ -36,7 +37,8 @@ class RpcCommunicator(Communicator):
 
 
         :int base_port: Baseline port number to connect to Unity environment over. worker_id increments over this.
-        :int worker_id: Number to add to communication port (5005) [0]. Used for asynchronous agent scenarios.
+        :int worker_id: Offset from base_port. Used for training multiple environments simultaneously.
+        :int timeout_wait: Timeout (in seconds) to wait for a response before exiting.
         """
         super().__init__(worker_id, base_port)
         self.port = base_port + worker_id
@@ -73,6 +75,10 @@ class RpcCommunicator(Communicator):
         Attempts to bind to the requested communicator port, checking if it is already in use.
         """
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if platform == "linux" or platform == "linux2":
+            # On linux, the port remains unusable for TIME_WAIT=60 seconds after closing
+            # SO_REUSEADDR frees the port right after closing the environment
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("localhost", port))
         except socket.error:

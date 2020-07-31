@@ -1,232 +1,45 @@
 # # Unity ML-Agents Toolkit
-import argparse
+import yaml
 
 import os
-import glob
-import shutil
 import numpy as np
 import json
 
-from typing import Callable, Optional, List, NamedTuple, Dict
+from typing import Callable, Optional, List, Dict
 
 import mlagents.trainers
 import mlagents_envs
 from mlagents import tf_utils
 from mlagents.trainers.trainer_controller import TrainerController
 from mlagents.trainers.meta_curriculum import MetaCurriculum
-from mlagents.trainers.trainer_util import load_config, TrainerFactory
+from mlagents.trainers.trainer_util import TrainerFactory, handle_existing_directories
 from mlagents.trainers.stats import (
     TensorboardWriter,
     CSVWriter,
     StatsReporter,
     GaugeWriter,
+    ConsoleWriter,
 )
+from mlagents.trainers.cli_utils import parser
 from mlagents_envs.environment import UnityEnvironment
 from mlagents.trainers.sampler_class import SamplerManager
 from mlagents.trainers.exception import SamplerException
+from mlagents.trainers.settings import RunOptions
+from mlagents.trainers.training_status import GlobalTrainingStatus
 from mlagents_envs.base_env import BaseEnv
 from mlagents.trainers.subprocess_env_manager import SubprocessEnvManager
 from mlagents_envs.side_channel.side_channel import SideChannel
 from mlagents_envs.side_channel.engine_configuration_channel import EngineConfig
-from mlagents_envs.exception import UnityEnvironmentException
-from mlagents_envs.timers import hierarchical_timer, get_timer_tree
+from mlagents_envs.timers import (
+    hierarchical_timer,
+    get_timer_tree,
+    add_metadata as add_timer_metadata,
+)
 from mlagents_envs import logging_util
 
 logger = logging_util.get_logger(__name__)
 
-
-def _create_parser():
-    argparser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    argparser.add_argument("trainer_config_path")
-    argparser.add_argument(
-        "--env", default=None, dest="env_path", help="Name of the Unity executable "
-    )
-    argparser.add_argument(
-        "--curriculum",
-        default=None,
-        dest="curriculum_config_path",
-        help="Curriculum config yaml file for environment",
-    )
-    argparser.add_argument(
-        "--sampler",
-        default=None,
-        dest="sampler_file_path",
-        help="Reset parameter yaml file for environment",
-    )
-    argparser.add_argument(
-        "--keep-checkpoints",
-        default=5,
-        type=int,
-        help="How many model checkpoints to keep",
-    )
-    argparser.add_argument(
-        "--lesson", default=0, type=int, help="Start learning from this lesson"
-    )
-    argparser.add_argument(
-        "--load",
-        default=False,
-        dest="load_model",
-        action="store_true",
-        help="Whether to load the model or randomly initialize",
-    )
-    argparser.add_argument(
-        "--run-id",
-        default="ppo",
-        help="The directory name for model and summary statistics",
-    )
-    argparser.add_argument(
-        "--save-freq", default=50000, type=int, help="Frequency at which to save model"
-    )
-    argparser.add_argument(
-        "--seed", default=-1, type=int, help="Random seed used for training"
-    )
-    argparser.add_argument(
-        "--train",
-        default=False,
-        dest="train_model",
-        action="store_true",
-        help="Whether to train model, or only run inference",
-    )
-    argparser.add_argument(
-        "--base-port",
-        default=5005,
-        type=int,
-        help="Base port for environment communication",
-    )
-    argparser.add_argument(
-        "--num-envs",
-        default=1,
-        type=int,
-        help="Number of parallel environments to use for training",
-    )
-    argparser.add_argument(
-        "--docker-target-name",
-        default=None,
-        dest="docker_target_name",
-        help="Docker volume to store training-specific files",
-    )
-    argparser.add_argument(
-        "--no-graphics",
-        default=False,
-        action="store_true",
-        help="Whether to run the environment in no-graphics mode",
-    )
-    argparser.add_argument(
-        "--debug",
-        default=False,
-        action="store_true",
-        help="Whether to run ML-Agents in debug mode with detailed logging",
-    )
-    argparser.add_argument(
-        "--env-args",
-        default=None,
-        nargs=argparse.REMAINDER,
-        help="Arguments passed to the Unity executable.",
-    )
-    argparser.add_argument(
-        "--cpu", default=False, action="store_true", help="Run with CPU only"
-    )
-
-    argparser.add_argument("--version", action="version", version="")
-
-    eng_conf = argparser.add_argument_group(title="Engine Configuration")
-    eng_conf.add_argument(
-        "--width",
-        default=84,
-        type=int,
-        help="The width of the executable window of the environment(s)",
-    )
-    eng_conf.add_argument(
-        "--height",
-        default=84,
-        type=int,
-        help="The height of the executable window of the environment(s)",
-    )
-    eng_conf.add_argument(
-        "--quality-level",
-        default=5,
-        type=int,
-        help="The quality level of the environment(s)",
-    )
-    eng_conf.add_argument(
-        "--time-scale",
-        default=20,
-        type=float,
-        help="The time scale of the Unity environment(s)",
-    )
-    eng_conf.add_argument(
-        "--target-frame-rate",
-        default=-1,
-        type=int,
-        help="The target frame rate of the Unity environment(s)",
-    )
-    return argparser
-
-
-parser = _create_parser()
-
-
-class RunOptions(NamedTuple):
-    trainer_config: Dict
-    debug: bool = parser.get_default("debug")
-    seed: int = parser.get_default("seed")
-    env_path: Optional[str] = parser.get_default("env_path")
-    run_id: str = parser.get_default("run_id")
-    load_model: bool = parser.get_default("load_model")
-    train_model: bool = parser.get_default("train_model")
-    save_freq: int = parser.get_default("save_freq")
-    keep_checkpoints: int = parser.get_default("keep_checkpoints")
-    base_port: int = parser.get_default("base_port")
-    num_envs: int = parser.get_default("num_envs")
-    curriculum_config: Optional[Dict] = None
-    lesson: int = parser.get_default("lesson")
-    no_graphics: bool = parser.get_default("no_graphics")
-    multi_gpu: bool = parser.get_default("multi_gpu")
-    sampler_config: Optional[Dict] = None
-    docker_target_name: Optional[str] = parser.get_default("docker_target_name")
-    env_args: Optional[List[str]] = parser.get_default("env_args")
-    cpu: bool = parser.get_default("cpu")
-    width: int = parser.get_default("width")
-    height: int = parser.get_default("height")
-    quality_level: int = parser.get_default("quality_level")
-    time_scale: float = parser.get_default("time_scale")
-    target_frame_rate: int = parser.get_default("target_frame_rate")
-
-    @staticmethod
-    def from_argparse(args: argparse.Namespace) -> "RunOptions":
-        """
-        Takes an argparse.Namespace as specified in `parse_command_line`, loads input configuration files
-        from file paths, and converts to a CommandLineOptions instance.
-        :param args: collection of command-line parameters passed to mlagents-learn
-        :return: CommandLineOptions representing the passed in arguments, with trainer config, curriculum and sampler
-          configs loaded from files.
-        """
-        argparse_args = vars(args)
-        docker_target_name = argparse_args["docker_target_name"]
-        trainer_config_path = argparse_args["trainer_config_path"]
-        curriculum_config_path = argparse_args["curriculum_config_path"]
-        if docker_target_name is not None:
-            trainer_config_path = f"/{docker_target_name}/{trainer_config_path}"
-            if curriculum_config_path is not None:
-                curriculum_config_path = (
-                    f"/{docker_target_name}/{curriculum_config_path}"
-                )
-        argparse_args["trainer_config"] = load_config(trainer_config_path)
-        if curriculum_config_path is not None:
-            argparse_args["curriculum_config"] = load_config(curriculum_config_path)
-        if argparse_args["sampler_file_path"] is not None:
-            argparse_args["sampler_config"] = load_config(
-                argparse_args["sampler_file_path"]
-            )
-
-        # Since argparse accepts file paths in the config options which don't exist in CommandLineOptions,
-        # these keys will need to be deleted to use the **/splat operator below.
-        argparse_args.pop("sampler_file_path")
-        argparse_args.pop("curriculum_config_path")
-        argparse_args.pop("trainer_config_path")
-        return RunOptions(**vars(args))
+TRAINING_STATUS_FILE_NAME = "training_status.json"
 
 
 def get_version_string() -> str:
@@ -251,75 +64,95 @@ def run_training(run_seed: int, options: RunOptions) -> None:
     :param run_options: Command line arguments for training.
     """
     with hierarchical_timer("run_training.setup"):
-        # Recognize and use docker volume if one is passed as an argument
-        if not options.docker_target_name:
-            model_path = f"./models/{options.run_id}"
-            summaries_dir = "./summaries"
-        else:
-            model_path = f"/{options.docker_target_name}/models/{options.run_id}"
-            summaries_dir = f"/{options.docker_target_name}/summaries"
-        port = options.base_port
-
+        checkpoint_settings = options.checkpoint_settings
+        env_settings = options.env_settings
+        engine_settings = options.engine_settings
+        base_path = "results"
+        write_path = os.path.join(base_path, checkpoint_settings.run_id)
+        maybe_init_path = (
+            os.path.join(base_path, checkpoint_settings.initialize_from)
+            if checkpoint_settings.initialize_from
+            else None
+        )
+        run_logs_dir = os.path.join(write_path, "run_logs")
+        port: Optional[int] = env_settings.base_port
+        # Check if directory exists
+        handle_existing_directories(
+            write_path,
+            checkpoint_settings.resume,
+            checkpoint_settings.force,
+            maybe_init_path,
+        )
+        # Make run logs directory
+        os.makedirs(run_logs_dir, exist_ok=True)
+        # Load any needed states
+        if checkpoint_settings.resume:
+            GlobalTrainingStatus.load_state(
+                os.path.join(run_logs_dir, "training_status.json")
+            )
         # Configure CSV, Tensorboard Writers and StatsReporter
         # We assume reward and episode length are needed in the CSV.
         csv_writer = CSVWriter(
-            summaries_dir,
+            write_path,
             required_fields=[
                 "Environment/Cumulative Reward",
                 "Environment/Episode Length",
             ],
         )
-        tb_writer = TensorboardWriter(summaries_dir)
+        tb_writer = TensorboardWriter(
+            write_path, clear_past_data=not checkpoint_settings.resume
+        )
         gauge_write = GaugeWriter()
+        console_writer = ConsoleWriter()
         StatsReporter.add_writer(tb_writer)
         StatsReporter.add_writer(csv_writer)
         StatsReporter.add_writer(gauge_write)
+        StatsReporter.add_writer(console_writer)
 
-        if options.env_path is None:
-            port = UnityEnvironment.DEFAULT_EDITOR_PORT
+        if env_settings.env_path is None:
+            port = None
         env_factory = create_environment_factory(
-            options.env_path,
-            options.docker_target_name,
-            options.no_graphics,
+            env_settings.env_path,
+            engine_settings.no_graphics,
             run_seed,
             port,
-            options.env_args,
+            env_settings.env_args,
+            os.path.abspath(run_logs_dir),  # Unity environment requires absolute path
         )
         engine_config = EngineConfig(
-            options.width,
-            options.height,
-            options.quality_level,
-            options.time_scale,
-            options.target_frame_rate,
+            width=engine_settings.width,
+            height=engine_settings.height,
+            quality_level=engine_settings.quality_level,
+            time_scale=engine_settings.time_scale,
+            target_frame_rate=engine_settings.target_frame_rate,
+            capture_frame_rate=engine_settings.capture_frame_rate,
         )
-        env_manager = SubprocessEnvManager(env_factory, engine_config, options.num_envs)
+        env_manager = SubprocessEnvManager(
+            env_factory, engine_config, env_settings.num_envs
+        )
         maybe_meta_curriculum = try_create_meta_curriculum(
-            options.curriculum_config, env_manager, options.lesson
+            options.curriculum, env_manager, restore=checkpoint_settings.resume
         )
         sampler_manager, resampling_interval = create_sampler_manager(
-            options.sampler_config, run_seed
+            options.parameter_randomization, run_seed
         )
         trainer_factory = TrainerFactory(
-            options.trainer_config,
-            summaries_dir,
-            options.run_id,
-            model_path,
-            options.keep_checkpoints,
-            options.train_model,
-            options.load_model,
+            options.behaviors,
+            write_path,
+            not checkpoint_settings.inference,
+            checkpoint_settings.resume,
             run_seed,
+            maybe_init_path,
             maybe_meta_curriculum,
-            options.multi_gpu,
+            False,
         )
         # Create controller and begin training.
         tc = TrainerController(
             trainer_factory,
-            model_path,
-            summaries_dir,
-            options.run_id,
-            options.save_freq,
+            write_path,
+            checkpoint_settings.run_id,
             maybe_meta_curriculum,
-            options.train_model,
+            not checkpoint_settings.inference,
             run_seed,
             sampler_manager,
             resampling_interval,
@@ -330,11 +163,31 @@ def run_training(run_seed: int, options: RunOptions) -> None:
         tc.start_learning(env_manager)
     finally:
         env_manager.close()
-        write_timing_tree(summaries_dir, options.run_id)
+        write_run_options(write_path, options)
+        write_timing_tree(run_logs_dir)
+        write_training_status(run_logs_dir)
 
 
-def write_timing_tree(summaries_dir: str, run_id: str) -> None:
-    timing_path = f"{summaries_dir}/{run_id}_timers.json"
+def write_run_options(output_dir: str, run_options: RunOptions) -> None:
+    run_options_path = os.path.join(output_dir, "configuration.yaml")
+    try:
+        with open(run_options_path, "w") as f:
+            try:
+                yaml.dump(run_options.as_dict(), f, sort_keys=False)
+            except TypeError:  # Older versions of pyyaml don't support sort_keys
+                yaml.dump(run_options.as_dict(), f)
+    except FileNotFoundError:
+        logger.warning(
+            f"Unable to save configuration to {run_options_path}. Make sure the directory exists"
+        )
+
+
+def write_training_status(output_dir: str) -> None:
+    GlobalTrainingStatus.save_state(os.path.join(output_dir, TRAINING_STATUS_FILE_NAME))
+
+
+def write_timing_tree(output_dir: str) -> None:
+    timing_path = os.path.join(output_dir, "timers.json")
     try:
         with open(timing_path, "w") as f:
             json.dump(get_timer_tree(), f, indent=4)
@@ -367,81 +220,39 @@ def create_sampler_manager(sampler_config, run_seed=None):
 
 
 def try_create_meta_curriculum(
-    curriculum_config: Optional[Dict], env: SubprocessEnvManager, lesson: int
+    curriculum_config: Optional[Dict], env: SubprocessEnvManager, restore: bool = False
 ) -> Optional[MetaCurriculum]:
-    if curriculum_config is None:
+    if curriculum_config is None or len(curriculum_config) <= 0:
         return None
     else:
         meta_curriculum = MetaCurriculum(curriculum_config)
-        # TODO: Should be able to start learning at different lesson numbers
-        # for each curriculum.
-        meta_curriculum.set_all_curricula_to_lesson_num(lesson)
+        if restore:
+            meta_curriculum.try_restore_all_curriculum()
         return meta_curriculum
-
-
-def prepare_for_docker_run(docker_target_name, env_path):
-    for f in glob.glob(
-        "/{docker_target_name}/*".format(docker_target_name=docker_target_name)
-    ):
-        if env_path in f:
-            try:
-                b = os.path.basename(f)
-                if os.path.isdir(f):
-                    shutil.copytree(f, "/ml-agents/{b}".format(b=b))
-                else:
-                    src_f = "/{docker_target_name}/{b}".format(
-                        docker_target_name=docker_target_name, b=b
-                    )
-                    dst_f = "/ml-agents/{b}".format(b=b)
-                    shutil.copyfile(src_f, dst_f)
-                    os.chmod(dst_f, 0o775)  # Make executable
-            except Exception as e:
-                logger.info(e)
-    env_path = "/ml-agents/{env_path}".format(env_path=env_path)
-    return env_path
 
 
 def create_environment_factory(
     env_path: Optional[str],
-    docker_target_name: Optional[str],
     no_graphics: bool,
-    seed: Optional[int],
-    start_port: int,
+    seed: int,
+    start_port: Optional[int],
     env_args: Optional[List[str]],
+    log_folder: str,
 ) -> Callable[[int, List[SideChannel]], BaseEnv]:
-    if env_path is not None:
-        launch_string = UnityEnvironment.validate_environment_path(env_path)
-        if launch_string is None:
-            raise UnityEnvironmentException(
-                f"Couldn't launch the {env_path} environment. Provided filename does not match any environments."
-            )
-    docker_training = docker_target_name is not None
-    if docker_training and env_path is not None:
-        #     Comments for future maintenance:
-        #         Some OS/VM instances (e.g. COS GCP Image) mount filesystems
-        #         with COS flag which prevents execution of the Unity scene,
-        #         to get around this, we will copy the executable into the
-        #         container.
-        # Navigate in docker path and find env_path and copy it.
-        env_path = prepare_for_docker_run(docker_target_name, env_path)
-    seed_count = 10000
-    seed_pool = [np.random.randint(0, seed_count) for _ in range(seed_count)]
-
     def create_unity_environment(
         worker_id: int, side_channels: List[SideChannel]
     ) -> UnityEnvironment:
-        env_seed = seed
-        if not env_seed:
-            env_seed = seed_pool[worker_id % len(seed_pool)]
+        # Make sure that each environment gets a different seed
+        env_seed = seed + worker_id
         return UnityEnvironment(
             file_name=env_path,
             worker_id=worker_id,
             seed=env_seed,
-            docker_training=docker_training,
             no_graphics=no_graphics,
             base_port=start_port,
-            args=env_args,
+            additional_args=env_args,
             side_channels=side_channels,
+            log_folder=log_folder,
         )
 
     return create_unity_environment
@@ -481,13 +292,28 @@ def run_cli(options: RunOptions) -> None:
     logging_util.set_log_level(log_level)
 
     logger.debug("Configuration for this run:")
-    logger.debug(json.dumps(options._asdict(), indent=4))
+    logger.debug(json.dumps(options.as_dict(), indent=4))
 
-    run_seed = options.seed
-    if options.cpu:
-        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+    # Options deprecation warnings
+    if options.checkpoint_settings.load_model:
+        logger.warning(
+            "The --load option has been deprecated. Please use the --resume option instead."
+        )
+    if options.checkpoint_settings.train_model:
+        logger.warning(
+            "The --train option has been deprecated. Train mode is now the default. Use "
+            "--inference to run in inference mode."
+        )
 
-    if options.seed == -1:
+    run_seed = options.env_settings.seed
+
+    # Add some timer metadata
+    add_timer_metadata("mlagents_version", mlagents.trainers.__version__)
+    add_timer_metadata("mlagents_envs_version", mlagents_envs.__version__)
+    add_timer_metadata("communication_protocol_version", UnityEnvironment.API_VERSION)
+    add_timer_metadata("tensorflow_version", tf_utils.tf.__version__)
+
+    if options.env_settings.seed == -1:
         run_seed = np.random.randint(0, 10000)
     run_training(run_seed, options)
 

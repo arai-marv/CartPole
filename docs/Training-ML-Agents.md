@@ -1,242 +1,561 @@
 # Training ML-Agents
 
-The ML-Agents toolkit conducts training using an external Python training
-process. During training, this external process communicates with the Academy
-to generate a block of agent experiences. These
-experiences become the training set for a neural network used to optimize the
-agent's policy (which is essentially a mathematical function mapping
-observations to actions). In reinforcement learning, the neural network
-optimizes the policy by maximizing the expected rewards. In imitation learning,
-the neural network optimizes the policy to achieve the smallest difference
-between the actions chosen by the agent trainee and the actions chosen by the
-expert in the same situation.
+**Table of Contents**
 
-The output of the training process is a model file containing the optimized
-policy. This model file is a TensorFlow data graph containing the mathematical
-operations and the optimized weights selected during the training process. You
-can set the generated model file in the Behaviors Parameters under your
-Agent in your Unity project to decide the best course of action for an agent.
+- [Training with mlagents-learn](#training-with-mlagents-learn)
+  - [Starting Training](#starting-training)
+    - [Observing Training](#observing-training)
+    - [Stopping and Resuming Training](#stopping-and-resuming-training)
+    - [Loading an Existing Model](#loading-an-existing-model)
+- [Training Configurations](#training-configurations)
+  - [Behavior Configurations](#behavior-configurations)
+  - [Curriculum Learning](#curriculum-learning)
+    - [Specifying Curricula](#specifying-curricula)
+    - [Training with a Curriculum](#training-with-a-curriculum)
+  - [Environment Parameter Randomization](#environment-parameter-randomization)
+    - [Included Sampler Types](#included-sampler-types)
+    - [Defining a New Sampler Type](#defining-a-new-sampler-type)
+    - [Training with Environment Parameter Randomization](#training-with-environment-parameter-randomization)
+  - [Training Using Concurrent Unity Instances](#training-using-concurrent-unity-instances)
 
-Use the command `mlagents-learn` to train your agents. This command is installed
-with the `mlagents` package and its implementation can be found at
-`ml-agents/mlagents/trainers/learn.py`. The [configuration file](#training-config-file),
-like `config/trainer_config.yaml` specifies the hyperparameters used during training.
-You can edit this file with a text editor to add a specific configuration for
-each Behavior.
+For a broad overview of reinforcement learning, imitation learning and all the
+training scenarios, methods and options within the ML-Agents Toolkit, see
+[ML-Agents Toolkit Overview](ML-Agents-Overview.md).
 
-For a broader overview of reinforcement learning, imitation learning and the
-ML-Agents training process, see [ML-Agents Toolkit
-Overview](ML-Agents-Overview.md).
+Once your learning environment has been created and is ready for training, the
+next step is to initiate a training run. Training in the ML-Agents Toolkit is
+powered by a dedicated Python package, `mlagents`. This package exposes a
+command `mlagents-learn` that is the single entry point for all training
+workflows (e.g. reinforcement leaning, imitation learning, curriculum learning).
+Its implementation can be found at
+[ml-agents/mlagents/trainers/learn.py](../ml-agents/mlagents/trainers/learn.py).
 
 ## Training with mlagents-learn
 
-Use the `mlagents-learn` command to train agents. `mlagents-learn` supports
-training with
-[reinforcement learning](Background-Machine-Learning.md#reinforcement-learning),
-[curriculum learning](Training-Curriculum-Learning.md),
-and [behavioral cloning imitation learning](Training-Imitation-Learning.md).
+### Starting Training
 
-Run `mlagents-learn` from the command line to launch the training process. Use
-the command line patterns and the `config/trainer_config.yaml` file to control
-training options.
+`mlagents-learn` is the main training utility provided by the ML-Agents Toolkit.
+It accepts a number of CLI options in addition to a YAML configuration file that
+contains all the configurations and hyperparameters to be used during training.
+The set of configurations and hyperparameters to include in this file depend on
+the agents in your environment and the specific training method you wish to
+utilize. Keep in mind that the hyperparameter values can have a big impact on
+the training performance (i.e. your agent's ability to learn a policy that
+solves the task). In this page, we will review all the hyperparameters for all
+training methods and provide guidelines and advice on their values.
+
+To view a description of all the CLI options accepted by `mlagents-learn`, use
+the `--help`:
+
+```sh
+mlagents-learn --help
+```
 
 The basic command for training is:
 
 ```sh
-mlagents-learn <trainer-config-file> --env=<env_name> --run-id=<run-identifier> --train
+mlagents-learn <trainer-config-file> --env=<env_name> --run-id=<run-identifier>
 ```
 
 where
 
-* `<trainer-config-file>` is the file path of the trainer configuration yaml.
-* `<env_name>`__(Optional)__ is the name (including path) of your Unity
-  executable containing the agents to be trained. If `<env_name>` is not passed,
-  the training will happen in the Editor. Press the :arrow_forward: button in
-  Unity when the message _"Start training by pressing the Play button in the
-  Unity Editor"_ is displayed on the screen.
-* `<run-identifier>` is an optional identifier you can use to identify the
-  results of individual training runs.
+- `<trainer-config-file>` is the file path of the trainer configuration yaml.
+  This contains all the hyperparameter values. We offer a detailed guide on the
+  structure of this file and the meaning of the hyperparameters (and advice on
+  how to set them) in the dedicated
+  [Training Configurations](#training-configurations) section below.
+- `<env_name>`**(Optional)** is the name (including path) of your
+  [Unity executable](Learning-Environment-Executable.md) containing the agents
+  to be trained. If `<env_name>` is not passed, the training will happen in the
+  Editor. Press the **Play** button in Unity when the message _"Start training
+  by pressing the Play button in the Unity Editor"_ is displayed on the screen.
+- `<run-identifier>` is a unique name you can use to identify the results of
+  your training runs.
 
-For example, suppose you have a project in Unity named "CatsOnBicycles" which
-contains agents ready to train. To perform the training:
+See the
+[Getting Started Guide](Getting-Started.md#training-a-new-model-with-reinforcement-learning)
+for a sample execution of the `mlagents-learn` command.
 
-1. [Build the project](Learning-Environment-Executable.md), making sure that you
-   only include the training scene.
-2. Open a terminal or console window.
-3. Navigate to the directory where you installed the ML-Agents Toolkit.
-4. Run the following to launch the training process using the path to the Unity
-   environment you built in step 1:
+#### Observing Training
+
+Regardless of which training methods, configurations or hyperparameters you
+provide, the training process will always generate three artifacts, all found
+in the `results/<run-identifier>` folder:
+
+1. Summaries: these are training metrics that
+   are updated throughout the training process. They are helpful to monitor your
+   training performance and may help inform how to update your hyperparameter
+   values. See [Using TensorBoard](Using-Tensorboard.md) for more details on how
+   to visualize the training metrics.
+1. Models: these contain the model checkpoints that
+   are updated throughout training and the final model file (`.nn`). This final
+   model file is generated once either when training completes or is
+   interrupted.
+1. Timers file (under `results/<run-identifier>/run_logs`): this contains aggregated
+   metrics on your training process, including time spent on specific code
+   blocks. See [Profiling in Python](Profiling-Python.md) for more information
+   on the timers generated.
+
+These artifacts (except the `.nn` file) are updated throughout the training
+process and finalized when training completes or is interrupted.
+
+#### Stopping and Resuming Training
+
+To interrupt training and save the current progress, hit `Ctrl+C` once and wait
+for the model(s) to be saved out.
+
+To resume a previously interrupted or completed training run, use the `--resume`
+flag and make sure to specify the previously used run ID.
+
+If you would like to re-run a previously interrupted or completed training run
+and re-use the same run ID (in this case, overwriting the previously generated
+artifacts), then use the `--force` flag.
+
+#### Loading an Existing Model
+
+You can also use this mode to run inference of an already-trained model in
+Python by using both the `--resume` and `--inference` flags. Note that if you
+want to run inference in Unity, you should use the
+[Unity Inference Engine](Getting-Started.md#running-a-pre-trained-model).
+
+Alternatively, you might want to start a new training run but _initialize_ it
+using an already-trained model. You may want to do this, for instance, if your
+environment changed and you want a new model, but the old behavior is still
+better than random. You can do this by specifying
+`--initialize-from=<run-identifier>`, where `<run-identifier>` is the old run
+ID.
+
+## Training Configurations
+
+The Unity ML-Agents Toolkit provides a wide range of training scenarios, methods
+and options. As such, specific training runs may require different training
+configurations and may generate different artifacts and TensorBoard statistics.
+This section offers a detailed guide into how to manage the different training
+set-ups withing the toolkit.
+
+More specifically, this section offers a detailed guide on the command-line
+flags for `mlagents-learn` that control the training configurations:
+
+- `<trainer-config-file>`: defines the training hyperparameters for each
+  Behavior in the scene, and the set-ups for Curriculum Learning and
+  Environment Parameter Randomization
+- `--num-envs`: number of concurrent Unity instances to use during training
+
+Reminder that a detailed description of all command-line options can be found by
+using the help utility:
 
 ```sh
-mlagents-learn config/trainer_config.yaml --env=../../projects/Cats/CatsOnBicycles.app --run-id=cob_1 --train
+mlagents-learn --help
 ```
 
-During a training session, the training program prints out and saves updates at
-regular intervals (specified by the `summary_freq` option). The saved statistics
-are grouped by the `run-id` value so you should assign a unique id to each
-training run if you plan to view the statistics. You can view these statistics
-using TensorBoard during or after training by running the following command:
+It is important to highlight that successfully training a Behavior in the
+ML-Agents Toolkit involves tuning the training hyperparameters and
+configuration. This guide contains some best practices for tuning the training
+process when the default parameters don't seem to be giving the level of
+performance you would like. We provide sample configuration files for our
+example environments in the [config/](../config/) directory. The
+`config/ppo/3DBall.yaml` was used to train the 3D Balance Ball in the
+[Getting Started](Getting-Started.md) guide. That configuration file uses the
+PPO trainer, but we also have configuration files for SAC and GAIL.
+
+Additionally, the set of configurations you provide depend on the training
+functionalities you use (see [ML-Agents Toolkit Overview](ML-Agents-Overview.md)
+for a description of all the training functionalities). Each functionality you
+add typically has its own training configurations. For instance:
+
+- Use PPO or SAC?
+- Use Recurrent Neural Networks for adding memory to your agents?
+- Use the intrinsic curiosity module?
+- Ignore the environment reward signal?
+- Pre-train using behavioral cloning? (Assuming you have recorded
+  demonstrations.)
+- Include the GAIL intrinsic reward signals? (Assuming you have recorded
+  demonstrations.)
+- Use self-play? (Assuming your environment includes multiple agents.)
+
+
+The trainer config file, `<trainer-config-file>`, determines the features you will
+use during training, and the answers to the above questions will dictate its contents.
+The rest of this guide breaks down the different sub-sections of the trainer config file
+and explains the possible settings for each.
+
+**NOTE:** The configuration file format has been changed from 0.17.0 and onwards. To convert
+an old set of configuration files (trainer config, curriculum, and sampler files) to the new
+format, a script has been provided. Run `python -m mlagents.trainers.upgrade_config -h` in your
+console to see the script's usage.
+
+### Behavior Configurations
+
+The primary section of the trainer config file is a
+set of configurations for each Behavior in your scene. These are defined under
+the sub-section `behaviors` in your trainer config file. Some of the
+configurations are required while others are optional. To help us get started,
+below is a sample file that includes all the possible settings if we're using a
+PPO trainer with all the possible training functionalities enabled (memory,
+behavioral cloning, curiosity, GAIL and self-play). You will notice that
+curriculum and environment parameter randomization settings are not part of the `behaviors`
+configuration, but their settings live in different sections that we'll cover subsequently.
+
+```yaml
+behaviors:
+  BehaviorPPO:
+    trainer_type: ppo
+
+    hyperparameters:
+      # Hyperparameters common to PPO and SAC
+      batch_size: 1024
+      buffer_size: 10240
+      learning_rate: 3.0e-4
+      learning_rate_schedule: linear
+
+      # PPO-specific hyperparameters
+      # Replaces the "PPO-specific hyperparameters" section above
+      beta: 5.0e-3
+      epsilon: 0.2
+      lambd: 0.95
+      num_epoch: 3
+
+    # Configuration of the neural network (common to PPO/SAC)
+    network_settings:
+      vis_encoder_type: simple
+      normalize: false
+      hidden_units: 128
+      num_layers: 2
+      # memory
+      memory:
+        sequence_length: 64
+        memory_size: 256
+
+    # Trainer configurations common to all trainers
+    max_steps: 5.0e5
+    time_horizon: 64
+    summary_freq: 10000
+    keep_checkpoints: 5
+    checkpoint_interval: 50000
+    threaded: true
+    init_path: null
+
+    # behavior cloning
+    behavioral_cloning:
+      demo_path: Project/Assets/ML-Agents/Examples/Pyramids/Demos/ExpertPyramid.demo
+      strength: 0.5
+      steps: 150000
+      batch_size: 512
+      num_epoch: 3
+      samples_per_update: 0
+
+    reward_signals:
+      # environment reward (default)
+      extrinsic:
+        strength: 1.0
+        gamma: 0.99
+
+      # curiosity module
+      curiosity:
+        strength: 0.02
+        gamma: 0.99
+        encoding_size: 256
+        learning_rate: 3.0e-4
+
+      # GAIL
+      gail:
+        strength: 0.01
+        gamma: 0.99
+        encoding_size: 128
+        demo_path: Project/Assets/ML-Agents/Examples/Pyramids/Demos/ExpertPyramid.demo
+        learning_rate: 3.0e-4
+        use_actions: false
+        use_vail: false
+
+    # self-play
+    self_play:
+      window: 10
+      play_against_latest_model_ratio: 0.5
+      save_steps: 50000
+      swap_steps: 2000
+      team_change: 100000
+```
+
+Here is an equivalent file if we use an SAC trainer instead. Notice that the
+configurations for the additional functionalities (memory, behavioral cloning,
+curiosity and self-play) remain unchanged.
+
+```yaml
+behaviors:
+  BehaviorSAC:
+    trainer_type: sac
+
+    # Trainer configs common to PPO/SAC (excluding reward signals)
+    # same as PPO config
+
+    # SAC-specific configs (replaces the hyperparameters section above)
+    hyperparameters:
+      # Hyperparameters common to PPO and SAC
+      # Same as PPO config
+
+      # SAC-specific hyperparameters
+      # Replaces the "PPO-specific hyperparameters" section above
+      buffer_init_steps: 0
+      tau: 0.005
+      steps_per_update: 10.0
+      save_replay_buffer: false
+      init_entcoef: 0.5
+      reward_signal_steps_per_update: 10.0
+
+    # Configuration of the neural network (common to PPO/SAC)
+    network_settings:
+      # Same as PPO config
+
+    # Trainer configurations common to all trainers
+      # <Same as PPO config>
+
+    # pre-training using behavior cloning
+    behavioral_cloning:
+      # same as PPO config
+
+    reward_signals:
+      # environment reward
+      extrinsic:
+        # same as PPO config
+
+      # curiosity module
+      curiosity:
+        # same as PPO config
+
+      # GAIL
+      gail:
+        # same as PPO config
+
+    # self-play
+    self_play:
+      # same as PPO config
+```
+
+We now break apart the components of the configuration file and describe what
+each of these parameters mean and provide guidelines on how to set them. See
+[Training Configuration File](Training-Configuration-File.md) for a detailed
+description of all the configurations listed above, along with their defaults.
+Unless otherwise specified, omitting a configuration will revert it to its default.
+
+### Curriculum Learning
+
+To enable curriculum learning, you need to add a `curriculum ` sub-section to the trainer
+configuration YAML file. Within this sub-section, add an entry for each behavior that defines
+the curriculum for thatbehavior. Here is one example:
+
+```yml
+behaviors:
+  BehaviorY:
+    # < Same as above >
+
+# Add this section
+curriculum:
+  BehaviorY:
+    measure: progress
+    thresholds: [0.1, 0.3, 0.5]
+    min_lesson_length: 100
+    signal_smoothing: true
+    parameters:
+      wall_height: [1.5, 2.0, 2.5, 4.0]
+```
+
+Each group of Agents under the same `Behavior Name` in an environment can have a
+corresponding curriculum. These curricula are held in what we call a
+"metacurriculum". A metacurriculum allows different groups of Agents to follow
+different curricula within the same environment.
+
+#### Specifying Curricula
+
+In order to define the curricula, the first step is to decide which parameters
+of the environment will vary. In the case of the Wall Jump environment, the
+height of the wall is what varies. Rather than adjusting it by hand, we will
+create a configuration which describes the structure of the curricula. Within it, we
+can specify which points in the training process our wall height will change,
+either based on the percentage of training steps which have taken place, or what
+the average reward the agent has received in the recent past is. Below is an
+example config for the curricula for the Wall Jump environment.
+
+```yaml
+behaviors:
+  BigWallJump:
+    # < Trainer parameters for BigWallJump >
+  SmallWallJump:
+    # < Trainer parameters for SmallWallJump >
+
+curriculum:
+  BigWallJump:
+      measure: progress
+      thresholds: [0.1, 0.3, 0.5]
+      min_lesson_length: 100
+      signal_smoothing: true
+      parameters:
+        big_wall_min_height: [0.0, 4.0, 6.0, 8.0]
+        big_wall_max_height: [4.0, 7.0, 8.0, 8.0]
+  SmallWallJump:
+    measure: progress
+    thresholds: [0.1, 0.3, 0.5]
+    min_lesson_length: 100
+    signal_smoothing: true
+    parameters:
+      small_wall_height: [1.5, 2.0, 2.5, 4.0]
+```
+
+The curriculum for each Behavior has the following parameters:
+
+| **Setting**         | **Description**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| :------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `measure`           | What to measure learning progress, and advancement in lessons by.<br><br> `reward` uses a measure received reward, while `progress` uses the ratio of steps/max_steps.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `thresholds`        | Points in value of `measure` where lesson should be increased.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `min_lesson_length` | The minimum number of episodes that should be completed before the lesson can change. If `measure` is set to `reward`, the average cumulative reward of the last `min_lesson_length` episodes will be used to determine if the lesson should change. Must be nonnegative. <br><br> **Important**: the average reward that is compared to the thresholds is different than the mean reward that is logged to the console. For example, if `min_lesson_length` is `100`, the lesson will increment after the average cumulative reward of the last `100` episodes exceeds the current threshold. The mean reward logged to the console is dictated by the `summary_freq` parameter defined above. |
+| `signal_smoothing`  | Whether to weight the current progress measure by previous values.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `parameters`        | Corresponds to environment parameters to control. Length of each array should be one greater than number of thresholds.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+#### Training with a Curriculum
+
+Once we have specified our metacurriculum and curricula, we can launch
+`mlagents-learn` to point to the config file containing
+our curricula and PPO will train using Curriculum Learning. For example, to
+train agents in the Wall Jump environment with curriculum learning, we can run:
 
 ```sh
-tensorboard --logdir=summaries --port 6006
+mlagents-learn config/ppo/WallJump_curriculum.yaml --run-id=wall-jump-curriculum
 ```
 
-And then opening the URL: [localhost:6006](http://localhost:6006).
+We can then keep track of the current lessons and progresses via TensorBoard. If you've terminated
+the run, you can resume it using `--resume` and lesson progress will start off where it
+ended.
 
-**Note:** The default port TensorBoard uses is 6006. If there is an existing session
-running on port 6006 a new session can be launched on an open port using the --port
-option.
+### Environment Parameter Randomization
 
-When training is finished, you can find the saved model in the `models` folder
-under the assigned run-id — in the cats example, the path to the model would be
-`models/cob_1/CatsOnBicycles_cob_1.nn`.
+To enable parameter randomization, you need to add a `parameter-randomization` sub-section
+to your trainer config YAML file. Here is one example:
 
-While this example used the default training hyperparameters, you can edit the
-[training_config.yaml file](#training-config-file) with a text editor to set
-different values.
+```yaml
+behaviors:
+  # < Same as above>
 
-### Command Line Training Options
+parameter_randomization:
+  resampling-interval: 5000
 
-In addition to passing the path of the Unity executable containing your training
-environment, you can set the following command line options when invoking
-`mlagents-learn`:
+  mass:
+    sampler-type: "uniform"
+    min_value: 0.5
+    max_value: 10
 
-* `--env=<env>`: Specify an executable environment to train.
-* `--curriculum=<file>`: Specify a curriculum JSON file for defining the
-  lessons for curriculum training. See [Curriculum
-  Training](Training-Curriculum-Learning.md) for more information.
-* `--sampler=<file>`: Specify a sampler YAML file for defining the
-  sampler for generalization training. See [Generalization
-  Training](Training-Generalized-Reinforcement-Learning-Agents.md) for more information.
-* `--keep-checkpoints=<n>`: Specify the maximum number of model checkpoints to
-  keep. Checkpoints are saved after the number of steps specified by the
-  `save-freq` option. Once the maximum number of checkpoints has been reached,
-  the oldest checkpoint is deleted when saving a new checkpoint. Defaults to 5.
-* `--lesson=<n>`: Specify which lesson to start with when performing curriculum
-  training. Defaults to 0.
-* `--num-envs=<n>`: Specifies the number of concurrent Unity environment instances to
-  collect experiences from when training. Defaults to 1.
-* `--run-id=<path>`: Specifies an identifier for each training run. This
-  identifier is used to name the subdirectories in which the trained model and
-  summary statistics are saved as well as the saved model itself. The default id
-  is "ppo". If you use TensorBoard to view the training statistics, always set a
-  unique run-id for each training run. (The statistics for all runs with the
-  same id are combined as if they were produced by a the same session.)
-* `--save-freq=<n>`: Specifies how often (in  steps) to save the model during
-  training. Defaults to 50000.
-* `--seed=<n>`: Specifies a number to use as a seed for the random number
-  generator used by the training code.
-* `--env-args=<string>`: Specify arguments for the executable environment. Be aware that
-  the standalone build will also process these as
-  [Unity Command Line Arguments](https://docs.unity3d.com/Manual/CommandLineArguments.html).
-  You should choose different argument names if you want to create environment-specific arguments.
-  All arguments after this flag will be passed to the executable. For example, setting
-  `mlagents-learn config/trainer_config.yaml --env-args --num-orcs 42` would result in
-   ` --num-orcs 42` passed to the executable.
-* `--base-port`: Specifies the starting port. Each concurrent Unity environment instance
-  will get assigned a port sequentially, starting from the `base-port`. Each instance
-  will use the port `(base_port + worker_id)`, where the `worker_id` is sequential IDs
-  given to each instance from 0 to `num_envs - 1`. Default is 5005. __Note:__ When
-  training using the Editor rather than an executable, the base port will be ignored.
-* `--train`: Specifies whether to train model or only run in inference mode.
-  When training, **always** use the `--train` option.
-* `--load`: If set, the training code loads an already trained model to
-  initialize the neural network before training. The learning code looks for the
-  model in `models/<run-id>/` (which is also where it saves models at the end of
-  training). When not set (the default), the neural network weights are randomly
-  initialized and an existing model is not loaded.
-* `--no-graphics`: Specify this option to run the Unity executable in
-  `-batchmode` and doesn't initialize the graphics driver. Use this only if your
-  training doesn't involve visual observations (reading from Pixels). See
-  [here](https://docs.unity3d.com/Manual/CommandLineArguments.html) for more
-  details.
-* `--debug`: Specify this option to enable debug-level logging for some parts of the code.
-* `--cpu`: Forces training using CPU only.
-* Engine Configuration :
-  * `--width' : The width of the executable window of the environment(s) in pixels
-  (ignored for editor training) (Default 84)
-  * `--height` : The height of the executable window of the environment(s) in pixels
-  (ignored for editor training). (Default 84)
-  * `--quality-level` : The quality level of the environment(s). Equivalent to
-  calling `QualitySettings.SetQualityLevel` in Unity. (Default 5)
-  * `--time-scale` : The time scale of the Unity environment(s). Equivalent to setting
-  `Time.timeScale` in Unity. (Default 20.0, maximum 100.0)
-  * `--target-frame-rate` : The target frame rate of the Unity environment(s).
-  Equivalent to setting `Application.targetFrameRate` in Unity. (Default: -1)
+  gravity:
+    sampler-type: "multirange_uniform"
+    intervals: [[7, 10], [15, 20]]
 
-### Training Config File
+  scale:
+    sampler-type: "uniform"
+    min_value: 0.75
+    max_value: 3
+```
 
-The training config files `config/trainer_config.yaml`, `config/sac_trainer_config.yaml`,
-`config/gail_config.yaml` and `config/offline_bc_config.yaml` specifies the training method,
-the hyperparameters, and a few additional values to use when training with Proximal Policy
-Optimization(PPO), Soft Actor-Critic(SAC), GAIL (Generative Adversarial Imitation Learning)
-with PPO/SAC, and Behavioral Cloning(BC)/Imitation with PPO/SAC. These files are divided
-into sections. The **default** section defines the default values for all the available
-training with PPO, SAC, GAIL (with PPO), and BC. These files are divided into sections.
-The **default** section defines the default values for all the available settings. You can
-also add new sections to override these defaults to train specific Behaviors. Name each of these
-override sections after the appropriate `Behavior Name`. Sections for the
-example environments are included in the provided config file.
+Note that `mass`, `gravity` and `scale` are the names of the environment
+parameters that will be sampled. If a parameter specified in the file doesn't
+exist in the environment, then this parameter will be ignored.
 
-|     **Setting**      |                                                                                     **Description**                                                                                     | **Applies To Trainer\*** |
-| :------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------- |
-| batch_size           | The number of experiences in each iteration of gradient descent.                                                                                                                        | PPO, SAC             |
-| batches_per_epoch    | In imitation learning, the number of batches of training examples to collect before training the model.                                                                                 |                        |
-| beta                 | The strength of entropy regularization.                                                                                                                                                 | PPO                      |
-| buffer_size          | The number of experiences to collect before updating the policy model. In SAC, the max size of the experience buffer.                                                                   | PPO, SAC                 |
-| buffer_init_steps    | The number of experiences to collect into the buffer before updating the policy model.                                                                                                  | SAC                      |
-| epsilon              | Influences how rapidly the policy can evolve during training.                                                                                                                           | PPO                      |
-| hidden_units         | The number of units in the hidden layers of the neural network.                                                                                                                         | PPO, SAC             |
-| init_entcoef         | How much the agent should explore in the beginning of training.                                                                                                                         | SAC                      |
-| lambd                | The regularization parameter.                                                                                                                                                           | PPO                      |
-| learning_rate        | The initial learning rate for gradient descent.                                                                                                                                         | PPO, SAC             |
-| learning_rate_schedule | Determines how learning rate changes over time. | PPO, SAC |
-| max_steps            | The maximum number of simulation steps to run during a training session.                                                                                                                | PPO, SAC             |
-| memory_size          | The size of the memory an agent must keep. Used for training with a recurrent neural network. See [Using Recurrent Neural Networks](Feature-Memory.md).                                 | PPO, SAC             |
-| normalize            | Whether to automatically normalize observations.                                                                                                                                        | PPO, SAC                 |
-| num_epoch            | The number of passes to make through the experience buffer when performing gradient descent optimization.                                                                               | PPO                      |
-| num_layers           | The number of hidden layers in the neural network.                                                                                                                                      | PPO, SAC             |
-| behavioral_cloning          | Use demonstrations to bootstrap the policy neural network. See [Pretraining Using Demonstrations](Training-PPO.md#optional-behavioral-cloning-using-demonstrations).                           | PPO, SAC                 |
-| reward_signals       | The reward signals used to train the policy. Enable Curiosity and GAIL here. See [Reward Signals](Reward-Signals.md) for configuration options.                                         | PPO, SAC             |
-| save_replay_buffer   | Saves the replay buffer when exiting training, and loads it on resume.                                                                                                                  | SAC                      |
-| sequence_length      | Defines how long the sequences of experiences must be while training. Only used for training with a recurrent neural network. See [Using Recurrent Neural Networks](Feature-Memory.md). | PPO, SAC             |
-| summary_freq         | How often, in steps, to save training statistics. This determines the number of data points shown by TensorBoard.                                                                       | PPO, SAC             |
-| tau                  | How aggressively to update the target network used for bootstrapping value estimation in SAC.                                                                                           | SAC                      |
-| time_horizon         | How many steps of experience to collect per-agent before adding it to the experience buffer.                                                                                            | PPO, SAC    |
-| trainer              | The type of training to perform: "ppo", "sac", "offline_bc" or "online_bc".                                                                                                             | PPO, SAC             |
-| train_interval       | How often to update the agent.                                                                                                                                                          | SAC                      |
-| num_update           | Number of mini-batches to update the agent with during each update.                                                                                                                     | SAC                      |
-| use_recurrent        | Train using a recurrent neural network. See [Using Recurrent Neural Networks](Feature-Memory.md).                                                                                       | PPO, SAC             |
+| **Setting**                  | **Description**                                                                                                                                                                                                                                                                                                                         |
+| :--------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resampling-interval`        | Number of steps for the agent to train under a particular environment configuration before resetting the environment with a new sample of `Environment Parameters`.                                                                                                                                                                     |
+| `sampler-type`               | Type of sampler use for this `Environment Parameter`. This is a string that should exist in the `Sampler Factory` (explained below).                                                                                                                                                                                                    |
+| `sampler-type-sub-arguments` | Specify the sub-arguments depending on the `sampler-type`. In the example above, this would correspond to the `intervals` under the `sampler-type` `multirange_uniform` for the `Environment Parameter` called `gravity`. The key name should match the name of the corresponding argument in the sampler definition (explained) below) |
 
-\*PPO = Proximal Policy Optimization, SAC = Soft Actor-Critic, BC = Behavioral Cloning (Imitation), GAIL = Generative Adversarial Imitaiton Learning
+#### Included Sampler Types
 
-For specific advice on setting hyperparameters based on the type of training you
-are conducting, see:
+Below is a list of included `sampler-type` as part of the toolkit.
 
-* [Training with PPO](Training-PPO.md)
-* [Training with SAC](Training-SAC.md)
-* [Using Recurrent Neural Networks](Feature-Memory.md)
-* [Training with Curriculum Learning](Training-Curriculum-Learning.md)
-* [Training with Imitation Learning](Training-Imitation-Learning.md)
-* [Training Generalized Reinforcement Learning Agents](Training-Generalized-Reinforcement-Learning-Agents.md)
+- `uniform` - Uniform sampler
+  - Uniformly samples a single float value between defined endpoints. The
+    sub-arguments for this sampler to specify the interval endpoints are as
+    below. The sampling is done in the range of [`min_value`, `max_value`).
+  - **sub-arguments** - `min_value`, `max_value`
+- `gaussian` - Gaussian sampler
+  - Samples a single float value from the distribution characterized by the mean
+    and standard deviation. The sub-arguments to specify the Gaussian
+    distribution to use are as below.
+  - **sub-arguments** - `mean`, `st_dev`
+- `multirange_uniform` - Multirange uniform sampler
+  - Uniformly samples a single float value between the specified intervals.
+    Samples by first performing a weight pick of an interval from the list of
+    intervals (weighted based on interval width) and samples uniformly from the
+    selected interval (half-closed interval, same as the uniform sampler). This
+    sampler can take an arbitrary number of intervals in a list in the following
+    format: [[`interval_1_min`, `interval_1_max`], [`interval_2_min`,
+    `interval_2_max`], ...]
+  - **sub-arguments** - `intervals`
 
-You can also compare the
-[example environments](Learning-Environment-Examples.md)
-to the corresponding sections of the `config/trainer_config.yaml` file for each
-example to see how the hyperparameters and other configuration variables have
-been changed from the defaults.
+The implementation of the samplers can be found in the
+[sampler_class.py file](../ml-agents/mlagents/trainers/sampler_class.py).
 
-### Debugging and Profiling
-If you enable the `--debug` flag in the command line, the trainer metrics are logged to a CSV file
-stored in the `summaries` directory. The metrics stored are:
-  * brain name
-  * time to update policy
-  * time since start of training
-  * time for last experience collection
-  * number of experiences used for training
-  * mean return
+#### Defining a New Sampler Type
 
-This option is not available currently for Behavioral Cloning.
+If you want to define your own sampler type, you must first inherit the
+_Sampler_ base class (included in the `sampler_class` file) and preserve the
+interface. Once the class for the required method is specified, it must be
+registered in the Sampler Factory.
 
-Additionally, we have included basic [Profiling in Python](Profiling-Python.md) as part of the toolkit.
-This information is also saved in the `summaries` directory.
+This can be done by subscribing to the _register_sampler_ method of the
+`SamplerFactory`. The command is as follows:
+
+`SamplerFactory.register_sampler(*custom_sampler_string_key*, *custom_sampler_object*)`
+
+Once the Sampler Factory reflects the new register, the new sampler type can be
+used for sample any `Environment Parameter`. For example, lets say a new sampler
+type was implemented as below and we register the `CustomSampler` class with the
+string `custom-sampler` in the Sampler Factory.
+
+```python
+class CustomSampler(Sampler):
+
+    def __init__(self, argA, argB, argC):
+        self.possible_vals = [argA, argB, argC]
+
+    def sample_all(self):
+        return np.random.choice(self.possible_vals)
+```
+
+Now we need to specify the new sampler type in the sampler YAML file. For
+example, we use this new sampler type for the `Environment Parameter` _mass_.
+
+```yaml
+mass:
+  sampler-type: "custom-sampler"
+  argB: 1
+  argA: 2
+  argC: 3
+```
+
+#### Training with Environment Parameter Randomization
+
+After the sampler configuration is defined, we proceed by launching `mlagents-learn`
+and specify trainer configuration with `parameter-randomization` defined. For example,
+if we wanted to train the 3D ball agent with parameter randomization using
+`Environment Parameters` with sampling setup, we would run
+
+```sh
+mlagents-learn config/ppo/3DBall_randomize.yaml --run-id=3D-Ball-randomize
+```
+
+We can observe progress and metrics via Tensorboard.
+
+### Training Using Concurrent Unity Instances
+
+In order to run concurrent Unity instances during training, set the number of
+environment instances using the command line option `--num-envs=<n>` when you
+invoke `mlagents-learn`. Optionally, you can also set the `--base-port`, which
+is the starting port used for the concurrent Unity instances.
+
+Some considerations:
+
+- **Buffer Size** - If you are having trouble getting an agent to train, even
+  with multiple concurrent Unity instances, you could increase `buffer_size` in
+  the trainer config file. A common practice is to multiply
+  `buffer_size` by `num-envs`.
+- **Resource Constraints** - Invoking concurrent Unity instances is constrained
+  by the resources on the machine. Please use discretion when setting
+  `--num-envs=<n>`.
+- **Result Variation Using Concurrent Unity Instances** - If you keep all the
+  hyperparameters the same, but change `--num-envs=<n>`, the results and model
+  would likely change.
